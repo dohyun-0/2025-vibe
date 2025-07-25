@@ -3,6 +3,7 @@ import folium
 from streamlit_folium import st_folium
 import json
 import os
+import requests
 
 BOOKMARK_FILE = "bookmarks.json"
 
@@ -18,24 +19,43 @@ def save_bookmarks(bookmarks):
     with open(BOOKMARK_FILE, "w", encoding="utf-8") as f:
         json.dump(bookmarks, f, ensure_ascii=False, indent=2)
 
+# 장소명으로 위도/경도 검색
+def search_location(query):
+    url = "https://nominatim.openstreetmap.org/search"
+    params = {
+        "q": query,
+        "format": "json",
+        "limit": 1
+    }
+    headers = {
+        "User-Agent": "my-bookmark-app"
+    }
+    response = requests.get(url, params=params, headers=headers)
+    results = response.json()
+    if results:
+        return float(results[0]["lat"]), float(results[0]["lon"])
+    return None, None
+
 # Streamlit 설정
 st.set_page_config(page_title="나만의 북마크 지도", layout="wide")
 st.title("📍 나만의 북마크 지도")
 
 # 사이드바 - 북마크 추가
 with st.sidebar:
-    st.header("➕ 장소 추가")
-    name = st.text_input("장소 이름")
+    st.header("🔍 장소 검색 및 북마크")
+    name = st.text_input("장소 이름 (예: 서울시청, Eiffel Tower 등)")
     desc = st.text_area("설명")
-    lat = st.number_input("위도", format="%.6f")
-    lon = st.number_input("경도", format="%.6f")
 
-    if st.button("북마크 저장"):
+    if st.button("🔎 검색 후 북마크 저장"):
         if name and desc:
-            bookmarks = load_bookmarks()
-            bookmarks.append({"name": name, "desc": desc, "lat": lat, "lon": lon})
-            save_bookmarks(bookmarks)
-            st.success("✅ 북마크가 저장되었습니다.")
+            lat, lon = search_location(name)
+            if lat and lon:
+                bookmarks = load_bookmarks()
+                bookmarks.append({"name": name, "desc": desc, "lat": lat, "lon": lon})
+                save_bookmarks(bookmarks)
+                st.success(f"✅ {name} 저장 완료! ({lat:.5f}, {lon:.5f})")
+            else:
+                st.error("❌ 장소를 찾을 수 없습니다.")
         else:
             st.warning("⚠️ 장소 이름과 설명을 모두 입력해주세요.")
 
