@@ -28,8 +28,13 @@ def preprocess_gender(df):
     df = df[~df["행정구역"].str.contains("소계|계")].copy()
     df["시도"] = df["행정구역"].apply(lambda x: x.split()[0])
 
-    male_cols = [col for col in df.columns if "_남_" in col]
-    female_cols = [col for col in df.columns if "_여_" in col]
+    # 불필요한 열 제거
+    drop_cols = [col for col in df.columns if "총인구수" in col or "연령구간인구수" in col]
+    df = df.drop(columns=drop_cols)
+
+    # 남녀 연령 관련 열만 선택
+    male_cols = [col for col in df.columns if "_남_" in col and "세" in col]
+    female_cols = [col for col in df.columns if "_여_" in col and "세" in col]
 
     for col in male_cols + female_cols:
         df[col] = df[col].astype(str).str.replace(",", "").astype(int)
