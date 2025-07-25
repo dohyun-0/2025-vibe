@@ -1,8 +1,9 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+from collections import defaultdict
 
-# 📥 인구 통계 데이터 로딩
+# 📥 데이터 로딩
 @st.cache_data
 def load_data():
     df_total = pd.read_csv("202506_202506_연령별인구현황_월간_합계.csv", encoding="cp949")
@@ -10,14 +11,14 @@ def load_data():
     df_econ = pd.read_csv("연령별_경제활동인구_총괄_20250725132144.csv", encoding="utf-8")
     return df_total, df_gender, df_econ
 
-# 🧹 일반 인구 전처리
+# 🧹 기본 인구 전처리
 def preprocess(df):
     df.columns = df.columns.str.strip()
     df = df.rename(columns={df.columns[0]: "행정구역"})
-    df = df[~df["행정구역"].str.contains("소계|계")].copy()
+    df = df[~df["행정구역"].str.contains("소계|계")]
     df["시도"] = df["행정구역"].apply(lambda x: x.split()[0])
-    df["총인구수"] = df["2025년06월_계_총인구수"].astype(str).str.replace(",", "").astype(int)
-    df["연령구간인구수"] = df["2025년06월_계_연령구간인구수"].astype(str).str.replace(",", "").astype(int)
+    df["총인구수"] = df["2025년06월_계_총인구수"].str.replace(",", "").astype(int)
+    df["연령구간인구수"] = df["2025년06월_계_연령구간인구수"].str.replace(",", "").astype(int)
     age_cols = [col for col in df.columns if "세" in col and "계" in col]
     for col in age_cols:
         df[col] = df[col].astype(str).str.replace(",", "").astype(int)
@@ -27,7 +28,7 @@ def preprocess(df):
 def preprocess_gender(df):
     df.columns = df.columns.str.strip()
     df = df.rename(columns={df.columns[0]: "행정구역"})
-    df = df[~df["행정구역"].str.contains("소계|계")].copy()
+    df = df[~df["행정구역"].str.contains("소계|계")]
     df["시도"] = df["행정구역"].apply(lambda x: x.split()[0])
     drop_cols = [col for col in df.columns if "총인구수" in col or "연령구간인구수" in col]
     df = df.drop(columns=drop_cols)
@@ -37,41 +38,47 @@ def preprocess_gender(df):
         df[col] = df[col].astype(str).str.replace(",", "").astype(int)
     return df, male_cols, female_cols
 
-# 📊 실업률/고용률 데이터 전처리
-def preprocess_econ(df):
-    exclude = ["15세 이상 전체", "15 - 29세", "15 - 64세"]
-    rename_map = {"15 - 24세": "청년층 (15-24세)"}
-    df = df[df["연령계층별"].notna()]
-    df = df[~df["연령계층별"].isin(exclude)].copy()
-    df["연령계층별"] = df["연령계층별"].replace(rename_map)
-
-    # 연도 추출
-    years = sorted(list(set([col.split(".")[0] for col in df.columns if col.endswith(".6")])))
-    result = []
-    for year in years:
+# 🧹 실업률/고용률 전처리 (연도별 평균)
+def preprocess_econ_avg(df):
+    cols = [col for col in df.columns if col.endswith(".6") or col.endswith(".7")]
+    data_dict = defaultdict(lambda: defaultdict(list))
+    for col in cols:
         try:
-            u_col = f"{year}.06.6"
-            e_col = f"{year}.06.7"
+            year = int(col.split(".")[0])
+            code = col.split(".")[-1]
+            metric = "실업률" if code == "6" else "고용률"
             for _, row in df.iterrows():
-                result.append({
-                    "연도": int(year),
-                    "연령계층": row["연령계층별"],
-                    "실업률": float(row.get(u_col, 0)),
-                    "고용률": float(row.get(e_col, 0))
-                })
+                age_group = row["연령계층별"]
+                if pd.isna(age_group) or age_group in ["15세 이상 전체", "15 - 29세", "15 - 64세"]:
+                    continue
+                if age_group == "15 - 24세":
+                    age_group = "청년층 (15-24세)"
+                value = pd.to_numeric(row[col], errors="coerce")
+                if pd.notna(value):
+                    data_dict[(year, age_group, metric)]["값"].append(value)
         except:
             continue
-    return pd.DataFrame(result)
+    processed = []
+    for key, values in data_dict.items():
+        year, age_group, metric = key
+        mean_val = sum(values["값"]) / len(values["값"])
+        processed.append({
+            "연도": year,
+            "연령계층": age_group,
+            "지표": metric,
+            "값": round(mean_val, 2)
+        })
+    return pd.DataFrame(processed)
 
-# 🚀 Streamlit 앱 시작
+# 🚀 Streamlit 앱
 def main():
-    st.set_page_config(page_title="인구 + 실업률 통계 시각화", layout="wide")
+    st.set_page_config(page_title="인구 + 고용 통계 시각화", layout="wide")
     st.title("📊 인구 및 고용 통계 시각화 대시보드")
 
     df_total, df_gender, df_econ = load_data()
     df_total, age_cols = preprocess(df_total)
     df_gender, male_cols, female_cols = preprocess_gender(df_gender)
-    df_employ = preprocess_econ(df_econ)
+    df_employ = preprocess_econ_avg(df_econ)
 
     tab1, tab2, tab3, tab4 = st.tabs([
         "🗺️ 시도별 총/연령구간 인구",
@@ -115,7 +122,8 @@ def main():
     with tab4:
         st.subheader("💼 연령계층별 연도별 실업률 / 고용률")
         selected_type = st.radio("지표 선택", ["실업률", "고용률"], horizontal=True)
-        fig4 = px.line(df_employ, x="연도", y=selected_type, color="연령계층", markers=True,
+        df_filtered = df_employ[df_employ["지표"] == selected_type]
+        fig4 = px.line(df_filtered, x="연도", y="값", color="연령계층", markers=True,
                        title=f"연도별 {selected_type} (연령계층별)", template="plotly_dark")
         st.plotly_chart(fig4, use_container_width=True)
 
