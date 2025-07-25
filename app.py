@@ -18,13 +18,14 @@ def preprocess(df):
     df["시도"] = df["행정구역"].apply(lambda x: x.split()[0])
 
     # 총인구수, 연령구간인구수 숫자형 변환
-    df["총인구수"] = df["2025년06월_계_총인구수"].str.replace(",", "").astype(int)
-    df["연령구간인구수"] = df["2025년06월_계_연령구간인구수"].str.replace(",", "").astype(int)
+    df["총인구수"] = df["2025년06월_계_총인구수"].astype(str).str.replace(",", "").astype(int)
+    df["연령구간인구수"] = df["2025년06월_계_연령구간인구수"].astype(str).str.replace(",", "").astype(int)
 
     # 연령 관련 열 추출
     age_cols = [col for col in df.columns if "세" in col and "계" in col]
+
     for col in age_cols:
-        df[col] = df[col].str.replace(",", "").astype(int)
+        df[col] = df[col].astype(str).str.replace(",", "").astype(int)
 
     return df, age_cols
 
