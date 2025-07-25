@@ -216,30 +216,17 @@ def main():
         st.plotly_chart(fig4, use_container_width=True)
 
     with tab5:
-        st.subheader("🧩 15세 이상 전체: 연도별 실업률 vs 고용률 비교")
-
-        # 막대그래프용 데이터 변환
-        df_pivot = df_total_avg.pivot(
-            index="연도", columns="지표", values="값"
-        ).reset_index()
-
-        # melt 해서 long-format으로 변환
-        df_bar = df_pivot.melt(
-            id_vars="연도",
-            value_vars=["실업률", "고용률"],
-            var_name="지표",
-            value_name="값",
+        st.subheader("🧩 15세 이상 전체: 연도별 실업률 / 고용률")
+        selected_type5 = st.radio(
+            "지표 선택", ["실업률", "고용률"], horizontal=True, key="total_tab"
         )
-
-        # 그래프
-        fig5 = px.bar(
-            df_bar,
+        df_filtered5 = df_total_avg[df_total_avg["지표"] == selected_type5]
+        fig5 = px.line(
+            df_filtered5,
             x="연도",
             y="값",
-            color="지표",
-            barmode="group",
-            title="15세 이상 전체: 실업률 vs 고용률 (연도별)",
-            color_discrete_map={"실업률": "blue", "고용률": "red"},
+            markers=True,
+            title=f"15세 이상 전체 {selected_type5} 연도별 추이",
             template="plotly_dark",
         )
         st.plotly_chart(fig5, use_container_width=True)
