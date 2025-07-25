@@ -1,124 +1,67 @@
 import streamlit as st
-import folium
-from streamlit_folium import st_folium
-import json
-import os
-import requests
+import pandas as pd
+import plotly.express as px
 
-BOOKMARK_FILE = "bookmarks.json"
+# 데이터 로딩 함수
+@st.cache_data
+def load_data():
+    df_total = pd.read_csv("202506_202506_연령별인구현황_월간_합계.csv", encoding="cp949")
+    df_gender = pd.read_csv("202506_202506_연령별인구현황_월간_남녀구분.csv", encoding="cp949")
+    return df_total, df_gender
 
+# 데이터 전처리 함수
+def preprocess(df, title):
+    df = df.copy()
+    df.columns = df.columns.str.strip()
+    df = df.rename(columns={df.columns[0]: "행정구역"})
+    df = df[~df["행정구역"].str.contains("소계|계")]
+    df = df.set_index("행정구역")
+    df = df.applymap(lambda x: int(str(x).replace(",", "")) if isinstance(x, str) and x.replace(",", "").isdigit() else x)
+    df = df.dropna(axis=1, how='any')
+    df.index.name = title
+    return df
 
-# 북마크 불러오기
-def load_bookmarks():
-    if os.path.exists(BOOKMARK_FILE):
-        with open(BOOKMARK_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return []
+# Streamlit 메인 앱
+def main():
+    st.set_page_config(page_title="인구 통계 시각화 (Plotly)", layout="wide")
+    st.title("📊 2025년 6월 연령별 인구 통계 (Plotly 기반)")
 
+    # 데이터 로딩 및 전처리
+    df_total, df_gender = load_data()
+    df_total_cleaned = preprocess(df_total, "행정구역")
+    df_gender_cleaned = preprocess(df_gender, "행정구역")
 
-# 북마크 저장하기
-def save_bookmarks(bookmarks):
-    with open(BOOKMARK_FILE, "w", encoding="utf-8") as f:
-        json.dump(bookmarks, f, ensure_ascii=False, indent=2)
+    # 탭 구성
+    tab1, tab2 = st.tabs(["🔢 합계 인구 (Plotly Bar)", "👫 남녀 인구 (Plotly Line)"])
 
+    with tab1:
+        st.subheader("연령별 인구 - 전체")
+        selected_area = st.selectbox("행정구역 선택", df_total_cleaned.index, key="total_area")
+        row = df_total_cleaned.loc[selected_area]
+        df_plot = pd.DataFrame({
+            "연령": [col.split("_")[-1] for col in row.index],
+            "인구 수": row.values
+        })
+        fig = px.bar(df_plot, x="연령", y="인구 수", title=f"{selected_area} 연령별 인구 (합계)", template="plotly_dark")
+        st.plotly_chart(fig, use_container_width=True)
 
-# 장소명으로 후보 리스트 가져오기
-def search_locations(query):
-    url = "https://nominatim.openstreetmap.org/search"
-    params = {"q": query, "format": "json", "limit": 5}
-    headers = {"User-Agent": "my-bookmark-app"}
-    response = requests.get(url, params=params, headers=headers)
-    results = response.json()
-    return results
+    with tab2:
+        st.subheader("연령별 인구 - 남녀 구분")
+        selected_area2 = st.selectbox("행정구역 선택 (남녀)", df_gender_cleaned.index, key="gender_area")
 
+        male = df_gender_cleaned.loc[selected_area2].filter(like="_남_")
+        female = df_gender_cleaned.loc[selected_area2].filter(like="_여_")
 
-# 북마크 삭제
-def delete_bookmark(index):
-    bookmarks = load_bookmarks()
-    if 0 <= index < len(bookmarks):
-        del bookmarks[index]
-        save_bookmarks(bookmarks)
+        df_mf = pd.DataFrame({
+            "연령": [col.split("_")[-1] for col in male.index],
+            "남성": male.values,
+            "여성": female.values
+        })
 
+        df_mf_melted = df_mf.melt(id_vars="연령", value_vars=["남성", "여성"], var_name="성별", value_name="인구 수")
 
-# Streamlit 설정
-st.set_page_config(page_title="북마크 지도", layout="wide")
-st.title("📍 나만의 북마크 지도")
+        fig2 = px.line(df_mf_melted, x="연령", y="인구 수", color="성별", markers=True, title=f"{selected_area2} 연령별 남녀 인구", template="plotly_dark")
+        st.plotly_chart(fig2, use_container_width=True)
 
-with st.sidebar:
-    st.header("🔍 장소 검색 및 추가")
-    query = st.text_input("장소 검색")
-    search_results = []
-    selected_result = None
-
-    if query:
-        search_results = search_locations(query)
-        if search_results:
-            options = [f"{r['display_name']} ({r['lat']}, {r['lon']})" for r in search_results]
-            selected_option = st.selectbox("검색 결과", options)
-            selected_index = options.index(selected_option)
-            selected_result = search_results[selected_index]
-        else:
-            st.info("검색 결과가 없습니다.")
-
-    desc = st.text_area("설명")
-
-    if selected_result:
-        if st.button("➕ 북마크 추가"):
-            lat = float(selected_result["lat"])
-            lon = float(selected_result["lon"])
-            name = selected_result["display_name"]
-            if desc:
-                bookmarks = load_bookmarks()
-                bookmarks.append({
-                    "name": name,
-                    "desc": desc,
-                    "lat": lat,
-                    "lon": lon
-                })
-                save_bookmarks(bookmarks)
-                st.success("북마크 저장 완료!")
-            else:
-                st.warning("설명을 입력해주세요.")
-
-    st.markdown("---")
-    st.header("📚 저장된 북마크")
-
-    bookmarks = load_bookmarks()
-    for i, bm in enumerate(bookmarks):
-        with st.expander(f"{i+1}. {bm['name']}"):
-            st.markdown(f"**설명:** {bm['desc']}")
-            st.markdown(f"**위치:** ({bm['lat']}, {bm['lon']})")
-            if st.button(f"❌ 삭제", key=f"delete_{i}"):
-                delete_bookmark(i)
-                st.experimental_rerun()
-
-# 지도 생성
-map_center = [37.5665, 126.9780]
-if bookmarks:
-    map_center = [bookmarks[-1]["lat"], bookmarks[-1]["lon"]]
-
-m = folium.Map(location=map_center, zoom_start=12)
-
-# 저장된 북마크 마커 표시
-for bm in bookmarks:
-    folium.Marker(
-        [bm["lat"], bm["lon"]],
-        popup=f"<b>{bm['name']}</b><br>{bm['desc']}",
-        tooltip=bm["name"]
-    ).add_to(m)
-
-# 선택된 검색 결과 미리보기 마커 표시
-if selected_result:
-    lat = float(selected_result["lat"])
-    lon = float(selected_result["lon"])
-    folium.Marker(
-        [lat, lon],
-        popup="미리보기 장소",
-        tooltip="🧭 미리보기",
-        icon=folium.Icon(color="green")
-    ).add_to(m)
-    m.location = [lat, lon]
-    m.zoom_start = 14
-
-# 지도 렌더링
-st_data = st_folium(m, width=1000, height=600)
+if __name__ == "__main__":
+    main()
