@@ -38,7 +38,7 @@ def preprocess_gender(df):
         df[col] = df[col].astype(str).str.replace(",", "").astype(int)
     return df, male_cols, female_cols
 
-# 🧹 실업률/고용률 전처리 (연도별 평균)
+# 🧹 실업률/고용률 (연령계층별) 전처리
 def preprocess_econ_avg(df):
     cols = [col for col in df.columns if col.endswith(".6") or col.endswith(".7")]
     data_dict = defaultdict(lambda: defaultdict(list))
@@ -70,7 +70,32 @@ def preprocess_econ_avg(df):
         })
     return pd.DataFrame(processed)
 
-# 🚀 Streamlit 앱
+# 🧹 실업률/고용률 (15세 이상 전체) 전처리
+def preprocess_total_avg(df):
+    cols = [col for col in df.columns if col.endswith(".6") or col.endswith(".7")]
+    data_dict = defaultdict(list)
+    for col in cols:
+        try:
+            year = int(col.split(".")[0])
+            code = col.split(".")[-1]
+            metric = "실업률" if code == "6" else "고용률"
+            row = df[df["연령계층별"] == "15세 이상 전체"]
+            if not row.empty:
+                value = pd.to_numeric(row.iloc[0][col], errors="coerce")
+                if pd.notna(value):
+                    data_dict[(year, metric)].append(value)
+        except:
+            continue
+    result = []
+    for (year, metric), vals in data_dict.items():
+        result.append({
+            "연도": year,
+            "지표": metric,
+            "값": round(sum(vals) / len(vals), 2)
+        })
+    return pd.DataFrame(result)
+
+# 🚀 Streamlit 앱 시작
 def main():
     st.set_page_config(page_title="인구 + 고용 통계 시각화", layout="wide")
     st.title("📊 인구 및 고용 통계 시각화 대시보드")
@@ -79,12 +104,14 @@ def main():
     df_total, age_cols = preprocess(df_total)
     df_gender, male_cols, female_cols = preprocess_gender(df_gender)
     df_employ = preprocess_econ_avg(df_econ)
+    df_total_avg = preprocess_total_avg(df_econ)
 
-    tab1, tab2, tab3, tab4 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "🗺️ 시도별 총/연령구간 인구",
         "📈 연령별 인구 분포",
         "👥 남녀 인구 분포",
-        "💼 연령계층별 실업률/고용률"
+        "💼 연령계층별 실업률/고용률",
+        "🧩 전체 실업률/고용률 (15세 이상 전체)"
     ])
 
     with tab1:
@@ -126,6 +153,15 @@ def main():
         fig4 = px.line(df_filtered, x="연도", y="값", color="연령계층", markers=True,
                        title=f"연도별 {selected_type} (연령계층별)", template="plotly_dark")
         st.plotly_chart(fig4, use_container_width=True)
+
+    with tab5:
+        st.subheader("🧩 15세 이상 전체: 연도별 실업률 / 고용률")
+        selected_type5 = st.radio("지표 선택", ["실업률", "고용률"], horizontal=True, key="total_tab")
+        df_filtered5 = df_total_avg[df_total_avg["지표"] == selected_type5]
+        fig5 = px.line(df_filtered5, x="연도", y="값", markers=True,
+                       title=f"15세 이상 전체 {selected_type5} 연도별 추이",
+                       template="plotly_dark")
+        st.plotly_chart(fig5, use_container_width=True)
 
 if __name__ == "__main__":
     main()
